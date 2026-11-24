@@ -153,15 +153,38 @@ class CartesianTracking(Node):
             'joint_trajectory'
         )
 
-        self.joint_lower_limits = [
-            -1.25, -1.70, -1.57, 0.0,
-            -1.50, -0.75, -1.40
-        ]
+        # Position limits copied from the active OpenArmX V10
+        # bimanual URDF (robot_bimanual.urdf). The mirrored arms
+        # have different joint1 and joint2 ranges.
+        joint_limits_by_arm = {
+            'left': {
+                'lower': [
+                    -3.344396, -3.270796, -1.570000, 0.000000,
+                    -1.500000, -0.750000, -1.400000
+                ],
+                'upper': [
+                    0.905604, 0.129204, 1.570000, 1.800000,
+                    1.500000, 0.750000, 1.400000
+                ],
+            },
+            'right': {
+                'lower': [
+                    -1.250000, -0.129204, -1.570000, 0.000000,
+                    -1.500000, -0.750000, -1.400000
+                ],
+                'upper': [
+                    3.000000, 3.270796, 1.570000, 1.800000,
+                    1.500000, 0.750000, 1.400000
+                ],
+            },
+        }
 
-        self.joint_upper_limits = [
-            3.0, 1.70, 1.57, 1.8,
-            1.50, 0.75, 1.40
-        ]
+        self.joint_lower_limits = list(
+            joint_limits_by_arm[self.arm]['lower']
+        )
+        self.joint_upper_limits = list(
+            joint_limits_by_arm[self.arm]['upper']
+        )
 
         self.joint_max_velocities = [
             10.47 * self.velocity_scale
