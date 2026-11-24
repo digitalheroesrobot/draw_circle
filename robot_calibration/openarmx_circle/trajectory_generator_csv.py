@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import bisect
 import csv
 import math
 import os
@@ -27,7 +28,7 @@ class TrajectoryGenerator(Node):
 
         self.declare_parameter(
             'csv_file',
-            '~/openarmx_ws/src/openarmx_circle/trajectory.csv'
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data.csv')
         )
 
         self.declare_parameter('base_frame', 'world')
@@ -99,6 +100,7 @@ class TrajectoryGenerator(Node):
         # Load CSV
         # --------------------------------------------------
         self.trajectory = self.load_csv(self.csv_file)
+        self.trajectory_times = [point['t'] for point in self.trajectory]
 
         # --------------------------------------------------
         # Execution state
@@ -267,22 +269,6 @@ class TrajectoryGenerator(Node):
 
         return self.normalize_quaternion(result)
 
-    # ======================================================
-    # Pose utilities
-    # ======================================================
-    def pose_to_dict(self, pose):
-
-        return {
-            'x': pose.position.x,
-            'y': pose.position.y,
-            'z': pose.position.z,
-
-            'qx': pose.orientation.x,
-            'qy': pose.orientation.y,
-            'qz': pose.orientation.z,
-            'qw': pose.orientation.w
-        }
-
     def get_current_tcp_pose(self):
 
         transform = self.tf_buffer.lookup_transform(
@@ -368,7 +354,7 @@ class TrajectoryGenerator(Node):
 
         alpha = max(0.0, min(1.0, alpha))
 
-        return alpha * alpha * (3.0 - 2.0 * alpha)
+        return alpha**3 * (10.0 - 15.0 * alpha + 6.0 * alpha**2)
 
     # ======================================================
     # Pose interpolation
@@ -417,51 +403,62 @@ class TrajectoryGenerator(Node):
     # ======================================================
     def get_csv_pose(self, elapsed):
 
-        # 마지막 시간 이후에는 마지막 Pose 유지
+        if elapsed <= 0.0:
+            return self.trajectory[0].copy()
+
         if elapsed >= self.trajectory[-1]['t']:
             return self.trajectory[-1].copy()
 
-        # 해당 시간에 포함되는 두 행 찾기
-        for i in range(len(self.trajectory) - 1):
+        # Locate the active segment in O(log N).
+        i = bisect.bisect_right(self.trajectory_times, elapsed) - 1
+        p0 = self.trajectory[i]
+        p1 = self.trajectory[i + 1]
 
-            p1 = self.trajectory[i]
-            p2 = self.trajectory[i + 1]
+        t0 = p0['t']
+        t1 = p1['t']
+        dt = t1 - t0
+        u = (elapsed - t0) / dt
 
-            if p1['t'] <= elapsed <= p2['t']:
+        # Time-aware central-difference tangents keep velocity continuous
+        # across CSV knots instead of stopping at every recorded point.
+        def tangent(index, key):
+            if index == 0:
+                a, b = self.trajectory[0], self.trajectory[1]
+            elif index == len(self.trajectory) - 1:
+                a, b = self.trajectory[-2], self.trajectory[-1]
+            else:
+                a, b = self.trajectory[index - 1], self.trajectory[index + 1]
 
-                dt = p2['t'] - p1['t']
+            return (b[key] - a[key]) / (b['t'] - a['t'])
 
-                alpha = (elapsed - p1['t']) / dt
+        u2 = u * u
+        u3 = u2 * u
+        h00 = 2.0 * u3 - 3.0 * u2 + 1.0
+        h10 = u3 - 2.0 * u2 + u
+        h01 = -2.0 * u3 + 3.0 * u2
+        h11 = u3 - u2
 
-                # CSV 구간 내부는 시간 기준 보간
-                result = {}
+        result = {}
+        for key in ('x', 'y', 'z'):
+            m0 = tangent(i, key)
+            m1 = tangent(i + 1, key)
+            result[key] = (
+                h00 * p0[key]
+                + h10 * dt * m0
+                + h01 * p1[key]
+                + h11 * dt * m1
+            )
 
-                for key in ('x', 'y', 'z'):
-
-                    result[key] = (
-                        p1[key] + alpha * (p2[key] - p1[key])
-                    )
-
-                q1 = [
-                    p1['qx'], p1['qy'],
-                    p1['qz'], p1['qw']
-                ]
-
-                q2 = [
-                    p2['qx'], p2['qy'],
-                    p2['qz'], p2['qw']
-                ]
-
-                q = self.slerp(q1, q2, alpha)
-
-                result['qx'] = q[0]
-                result['qy'] = q[1]
-                result['qz'] = q[2]
-                result['qw'] = q[3]
-
-                return result
-
-        return self.trajectory[-1].copy()
+        # Orientation remains quaternion SLERP (shortest rotation).
+        q = self.slerp(
+            [p0['qx'], p0['qy'], p0['qz'], p0['qw']],
+            [p1['qx'], p1['qy'], p1['qz'], p1['qw']],
+            u
+        )
+        result.update({
+            'qx': q[0], 'qy': q[1], 'qz': q[2], 'qw': q[3]
+        })
+        return result
 
     # ======================================================
     # Publish PoseStamped
@@ -484,9 +481,6 @@ class TrajectoryGenerator(Node):
 
         self.publisher.publish(msg)
 
-    # ======================================================
-    # Main timer callback
-    # ======================================================
     # ======================================================
     # Main timer callback
     # ======================================================
@@ -548,9 +542,10 @@ class TrajectoryGenerator(Node):
         if csv_elapsed >= self.trajectory[-1]['t']:
 
             self.running = False
+            self.publish_state(0)
 
             self.get_logger().info(
-                'CSV trajectory completed'
+                'CSV trajectory completed; output forced OFF'
             )
 
             self.get_logger().info(
