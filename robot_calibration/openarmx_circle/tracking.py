@@ -749,8 +749,8 @@ class CartesianTracking(Node):
 
         self.ik_success_count += 1
 
-        limited_positions, dt, limited = (
-            self.apply_velocity_limit(target_positions)
+        limited_positions, limited = self.apply_velocity_limit(
+            target_positions
         )
 
         if limited:
@@ -902,7 +902,7 @@ class CartesianTracking(Node):
                 current + limited_delta
             )
 
-        return limited_positions, dt, was_limited
+        return limited_positions, was_limited
 
     # ======================================================
     # Publish joint trajectory
