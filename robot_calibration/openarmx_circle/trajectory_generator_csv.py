@@ -169,37 +169,38 @@ class TrajectoryGenerator(Node):
                 )
 
             for row in reader:
-
-                q = self.normalize_quaternion([
+                values = [
+                    float(row['t']),
+                    float(row['position.x']),
+                    float(row['position.y']),
+                    float(row['position.z']),
                     float(row['q.x']),
                     float(row['q.y']),
                     float(row['q.z']),
                     float(row['q.w'])
-                ])
+                ]
+                if not all(math.isfinite(value) for value in values):
+                    raise ValueError('CSV contains NaN or infinity')
+
+                q = self.normalize_quaternion(values[4:8])
                 on_off = int(row['on_off'])
-
                 if on_off not in (0, 1):
-                    raise ValueError(
-                        f'Invalid on_off value: {on_off}'
-                    )
+                    raise ValueError(f'Invalid on_off value: {on_off}')
+
                 trajectory.append({
-                    't': float(row['t']),
-
-                    'x': float(row['position.x']),
-                    'y': float(row['position.y']),
-                    'z': float(row['position.z']),
-
+                    't': values[0],
+                    'x': values[1],
+                    'y': values[2],
+                    'z': values[3],
                     'qx': q[0],
                     'qy': q[1],
                     'qz': q[2],
                     'qw': q[3],
-
                     'on_off': on_off
-
                 })
 
-        if not trajectory:
-            raise ValueError('CSV trajectory is empty')
+        if len(trajectory) < 2:
+            raise ValueError('CSV trajectory must contain at least two points')
 
         # 시간은 반드시 증가해야 함
         for i in range(1, len(trajectory)):
@@ -575,16 +576,8 @@ class TrajectoryGenerator(Node):
         if elapsed >= self.trajectory[-1]['t']:
             return self.trajectory[-1]['on_off']
 
-        for i in range(len(self.trajectory) - 1):
-
-            p1 = self.trajectory[i]
-            p2 = self.trajectory[i + 1]
-
-            if p1['t'] <= elapsed < p2['t']:
-
-                return p1['on_off']
-
-        return self.trajectory[-1]['on_off']
+        index = bisect.bisect_right(self.trajectory_times, elapsed) - 1
+        return self.trajectory[index]['on_off']
 
 def main(args=None):
 
