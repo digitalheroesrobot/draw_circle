@@ -47,7 +47,7 @@ class CartesianTracking(Node):
         self.declare_parameter('velocity_scale', 0.1)
         self.declare_parameter('max_rate_dt', 0.15)
 
-        self.declare_parameter('ik_stats_interval', 1)
+        self.declare_parameter('ik_stats_interval', 50)
 
         # SAFETY:
         # No joint commands are published unless explicitly enabled.
@@ -606,11 +606,6 @@ class CartesianTracking(Node):
 
         self.ik_request_start_time = time.perf_counter()
 
-        self.get_logger().info(
-            f'[IK REQUEST] id={request_id}, '
-            f'sequence={request_sequence}'
-        )
-
         try:
             future = self.ik_client.call_async(request)
 
@@ -760,12 +755,6 @@ class CartesianTracking(Node):
 
             self.publish_joint_trajectory(
                 limited_positions
-            )
-
-        else:
-            self.get_logger().info(
-                '[IK ONLY] Valid IK solution received. '
-                'Joint command publishing is disabled.'
             )
 
         # Do not wait for the next timer tick.
